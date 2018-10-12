@@ -41,25 +41,6 @@ void Tower::flip()
     sort();
 }
 
-std::string Tower::to_skeleton_string()
-{
-    std::vector<std::string> subs;
-    for (auto &e : atoms) subs.emplace_back(e.is_positive ? "+" : "-");
-    for (auto &e : towers) subs.push_back(e.to_skeleton_string());
-    //assert(!subs.empty());
-    assert(!atoms.empty() || !towers.empty());
-    std::string res = std::to_string(nvar);
-    res.push_back(':');
-
-    if (subs.size() > 1) res.push_back('(');
-    for (int i = 0; i < subs.size(); i++) {
-        if (i > 0) res.push_back('|');
-        res.append(subs[i]);
-    }
-    if (subs.size() > 1) res.push_back(')');
-    return res;
-}
-
 Tower::Tower(int _natom, int _nvar,
              std::vector<Atom> _atoms,
              std::vector<Tower> _towers)
@@ -73,90 +54,6 @@ Tower Tower::make_tower(int natom, int nvar,
     Tower tower(natom, nvar, atoms, towers);
     tower.sort();
     return tower;
-}
-
-void Tower::_dfs1(int n, int a, std::vector<std::vector<Tower::_Record>> &data,
-                               std::vector<Tower::_Record> &dummy)
-{
-    int m = 0;
-    for (auto &e : dummy) m += e.second.natom;
-
-    if (a + m == n) {
-        /*
-         * maximum quantifers: 1 + sig_i(s_i - 1)
-         * maximum slots: sig_i(s_i - 1) - nq + 1
-         * dummy is in descending order according to tower
-         */
-        std::vector<Atom> atoms((unsigned)a, Atom(false, -1, -1));
-        std::vector<Tower> towers;
-        int max_nq = a + 1; // 1 + sig_i(s_i - 1)
-        for (auto it = dummy.rbegin(); it != dummy.rend(); ++it) {
-            towers.push_back(it->second);
-            max_nq += it->first - 1;
-        }
-
-        // enumerate polarity of atomic formulas
-        for (int nfalse = 0; nfalse <= a; nfalse++) {
-            for (int i = 0; i < nfalse; i++) atoms[i].is_positive = false;
-            for (int i = nfalse; i < a; i++) atoms[i].is_positive = true;
-
-            // enumerate the number of quantifiers
-            for (int nq = 1; nq <= max_nq; nq++) {
-                Tower tower(n, nq, atoms, towers);
-                data[n].emplace_back(max_nq - nq, tower);
-            }
-        }
-        return;
-    }
-
-    int limit = std::min(n - a - m, n - 1);
-    if (!dummy.empty()) limit = std::min(limit, dummy.back().second.natom);
-    for (int k = 1; k <= limit; k++)
-        for (auto &record : data[k]) if (record.first > 0) {
-            if (!dummy.empty() && Tower::cmp(record.second, dummy.back().second) == 1)
-                continue;
-            dummy.push_back(record);
-            _dfs1(n, a, data, dummy);
-            dummy.pop_back();
-        }
-}
-
-std::vector<Tower> Tower::generate_skeleton(int n)
-{
-    std::vector<std::vector<_Record>> data;
-    data.emplace_back(); // initiate data[0]
-    std::vector<_Record> dummy;
-    for (int k = 1; k <= n; k++) {
-        /*
-         * Deal with the towers that contain at least two children
-         */
-        data.emplace_back(); // initiate data[k]
-
-        for (int a = 0; a <= k; a++) _dfs1(k, a, data, dummy);
-
-        for (int i = 0; i < data[k].size(); i++) {
-            std::vector<Tower> towers(1, data[k][i].second);
-            for (int nq = 1; nq <= data[k][i].first; nq++)
-                data[k].emplace_back(data[k][i].first - nq,
-                                     Tower(k, nq, std::vector<Atom>(), towers));
-        }
-    }
-
-    std::vector<Tower> towers;
-    for (auto &e : data[n]) towers.push_back(e.second);
-    return towers;
-}
-
-
-std::vector<Tower> Tower::generate(int n)
-{
-    /*
-     * First step is to generate the skeletons of towers.
-     * A skeleton is a structural tower with all arguments of Atom
-     * set to -1. The whole skeleton should obey ordering requirement
-     */
-    std::vector<Tower> sks = generate_skeleton(n);
-    return sks;
 }
 
 int _cmp(int l1, int r1, int l2, int r2, std::vector<Record> &sk)
@@ -235,8 +132,20 @@ void _union(int x, int y, std::vector<int> &p)
     p[_find(x, p)] = _find(y, p);
 }
 
-void Tower::dfs(int n, std::vector<Record> &sk)
+void Tower::search_raw(int n, std::vector<std::vector<Record>> &res)
 {
+    std::vector<Record> sk;
+    for (int i = 1; i <= n + 1; i++) {
+        sk.emplace_back(i);
+        dfs(n, sk, res);
+        sk.pop_back();
+    }
+}
+
+void Tower::dfs(int n, std::vector<Record> &sk, std::vector<std::vector<Record>> &res)
+{
+
+
     /*
      * Calculate some basic information. The reason we don't
      * put this information in arguments is that calculation
@@ -263,7 +172,13 @@ void Tower::dfs(int n, std::vector<Record> &sk)
         else
             natoms++;
     }
-    assert(!nqs.empty());
+
+    // Check whether done
+    if (nqs.empty()) {
+        res.push_back(sk);
+        return;
+    }
+
     int dep = 0, nq = nqs.back();
     for (int i = 0; i < nqs.size() - 1; i++) dep += nqs[i];
 
@@ -279,7 +194,7 @@ void Tower::dfs(int n, std::vector<Record> &sk)
      */
     for (int k = 1; k <= n - natoms; k++) {
         sk.emplace_back(k);
-        dfs(n, sk);
+        dfs(n, sk, res);
         sk.pop_back();
     }
 
@@ -296,7 +211,7 @@ void Tower::dfs(int n, std::vector<Record> &sk)
         link.push_back(pos_left.back());
 
         if (link[k] == 0 || !sk[link[k]-1].is_close() ||
-            _cmp(link[link[k]-1], link[k]-1, link[k], k, sk) <= 0) {
+            _cmp(link[link[k]-1], link[k]-1, link[k], k, sk) < 0) {
             // check distribution of quantifiers
             // [dep, dep + nq)
             std::vector<int> p(nq);
@@ -314,11 +229,11 @@ void Tower::dfs(int n, std::vector<Record> &sk)
                     }
                     else {
                         if (sk[i].arg1() >= dep) {
-                            if (last != -1) _union(last, sk[i].arg1() - dep);
+                            if (last != -1) _union(last, sk[i].arg1() - dep, p);
                             last = sk[i].arg1() - dep;
                         }
                         if (sk[i].arg2() >= dep) {
-                            if (last != -1) _union(last, sk[i].arg2() - dep);
+                            if (last != -1) _union(last, sk[i].arg2() - dep, p);
                             last = sk[i].arg2() - dep;
                         }
                     }
@@ -333,7 +248,7 @@ void Tower::dfs(int n, std::vector<Record> &sk)
                 }
             }
             for (int i = 1; i < nq; i++) if (_find(0, p) != _find(i, p)) ok = false;
-            if (ok) dfs(n, sk);
+            if (ok) dfs(n, sk, res);
         }
 
         sk.pop_back();
@@ -342,6 +257,15 @@ void Tower::dfs(int n, std::vector<Record> &sk)
     /*
      * Case III: Create one new atomic formula
      */
-
-
+    if (!sk.back().is_close() && natoms < n) {
+        for (int i = 0; i < dep + nq; i++)
+            for (int j = (i < dep ? dep : 0); j < dep + nq; j++)
+                for (int k = 0; k < 2; k++) {
+                    auto l = (int)sk.size();
+                    sk.emplace_back((bool)k, i, j);
+                    if (!sk[l-1].is_atom() || _cmp(l-1, l-1, l, l, sk) < 0)
+                        dfs(n, sk, res);
+                    sk.pop_back();
+                }
+    }
 }

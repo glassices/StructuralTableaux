@@ -101,21 +101,17 @@ public:
 
     void flip();
 
-    std::string to_skeleton_string();
-
     static Tower make_tower(int, int, const std::vector<Atom> &, const std::vector<Tower> &);
 
-    static std::vector<Tower> generate(int);
+    static void search_raw(int, std::vector<std::vector<Record>> &);
 
 private:
     typedef std::pair<int, Tower> _Record;
 
     Tower(int, int, std::vector<Atom>, std::vector<Tower>);
-    static void _dfs1(int, int, std::vector<std::vector<_Record>> &,
-                      std::vector<_Record> &);
-    static std::vector<Tower> generate_skeleton(int);
 
-    static void dfs(int, std::vector<Record> &);
+    static void dfs(int, std::vector<Record> &, std::vector<std::vector<Record>> &);
+
 };
 
 

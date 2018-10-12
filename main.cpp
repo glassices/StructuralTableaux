@@ -11,10 +11,10 @@ using namespace std;
 int main() {
     std::cout << "Hello, World!" << std::endl;
 
-    auto sks = Tower::generate(4);
-    for (auto &e : sks)
-        cout << e.to_skeleton_string() << endl;
-    cout << sks.size() << endl;
+    std::vector<std::vector<Record>> res;
+    Tower::search_raw(2, res);
+    for (auto &e : res) cout << e.size() << ' ';
+    cout << endl;
 
     return 0;
 }
