@@ -80,6 +80,8 @@ public:
     std::vector<Atom> atoms;
     std::vector<Tower> towers;
 
+    std::string to_string(int = 0);
+
     /*
      * Compare two Towers (each Tower must be self-normalized)
      * For Atom and Atom, just compare <is_positive, arg1, arg2>
@@ -103,10 +105,11 @@ public:
 
     static Tower make_tower(int, int, const std::vector<Atom> &, const std::vector<Tower> &);
 
-    static void search_raw(int, std::vector<std::vector<Record>> &);
+    static std::vector<Tower> search_raw(int);
 
 private:
-    typedef std::pair<int, Tower> _Record;
+
+    static Tower _to_tower(std::vector<Record>::iterator, std::vector<Record>::iterator);
 
     Tower(int, int, std::vector<Atom>, std::vector<Tower>);
 

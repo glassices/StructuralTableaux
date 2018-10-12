@@ -5,6 +5,37 @@
 #include "Tower.h"
 #include <cassert>
 #include <algorithm>
+#include <sstream>
+
+std::string Tower::to_string(int dep)
+{
+    assert(!atoms.empty() || !towers.empty());
+
+    std::stringstream ss;
+    ss << '[';
+    for (int i = 0; i < nvar; i++) {
+        if (i > 0) ss << ',';
+        ss << dep + i;
+    }
+    ss << "]:";
+
+    if (atoms.size() + towers.size() > 1) ss << '(';
+
+    bool is_first = true;
+    for (auto atom : atoms) {
+        if (is_first) is_first = false; else ss << '|';
+        if (!atom.is_positive) ss << '~';
+        ss << "E(" << atom.arg1 << ',' << atom.arg2 << ')';
+    }
+    for (auto tower : towers) {
+        if (is_first) is_first = false; else ss << '|';
+        ss << tower.to_string(dep + nvar);
+    }
+
+    if (atoms.size() + towers.size() > 1) ss << ')';
+
+    return ss.str();
+}
 
 int Tower::cmp(const Tower &t1, const Tower &t2)
 {
@@ -56,6 +87,38 @@ Tower Tower::make_tower(int natom, int nvar,
     return tower;
 }
 
+Tower Tower::_to_tower(std::vector<Record>::iterator lo,
+                       std::vector<Record>::iterator hi)
+{
+    assert(lo->is_open());
+    std::vector<Atom> atoms;
+    std::vector<Tower> towers;
+    int n = 0, prev = 0;
+    std::vector<Record>::iterator last;
+    /*
+    for (auto it = lo; it <= hi; ++it) {
+        if (it->is_open()) printf("(");
+        else if (it->is_close()) printf(")");
+        else printf("a");
+    }
+    puts("");
+    */
+    for (auto it = lo + 1; it < hi; ++it) {
+        if (it->is_atom()) {
+            n++;
+            if (prev == 0)
+                atoms.emplace_back(it->is_positive(), it->arg1(), it->arg2());
+        }
+        else if (it->is_open()) {
+            if (prev++ == 0) last = it;
+        }
+        else if (--prev == 0)
+            towers.push_back(_to_tower(last, it));
+    }
+    assert(prev == 0);
+    return Tower(n, lo->nq(), atoms, towers);
+}
+
 int _cmp(int l1, int r1, int l2, int r2, std::vector<Record> &sk)
 {
     if (sk[l1].is_atom()) {
@@ -90,6 +153,7 @@ int _cmp(int l1, int r1, int l2, int r2, std::vector<Record> &sk)
                     t1.emplace_back(last1, i);
                 }
             }
+            assert(prev1 == 0);
             for (int i = l2 + 1; i < r2; i++) {
                 if (sk[i].is_atom()) {
                     n2++;
@@ -102,6 +166,7 @@ int _cmp(int l1, int r1, int l2, int r2, std::vector<Record> &sk)
                     t2.emplace_back(last2, i);
                 }
             }
+            assert(prev2 == 0);
             if (n1 != n2) return n1 < n2 ? -1 : 1;
             if (sk[l1].nq() != sk[l2].nq())
                 return sk[l1].nq() < sk[l2].nq() ? -1 : 1;
@@ -132,20 +197,22 @@ void _union(int x, int y, std::vector<int> &p)
     p[_find(x, p)] = _find(y, p);
 }
 
-void Tower::search_raw(int n, std::vector<std::vector<Record>> &res)
+std::vector<Tower> Tower::search_raw(int n)
 {
     std::vector<Record> sk;
+    std::vector<std::vector<Record>> res;
     for (int i = 1; i <= n + 1; i++) {
         sk.emplace_back(i);
         dfs(n, sk, res);
         sk.pop_back();
     }
+    std::vector<Tower> towers;
+    for (auto &e : res) towers.push_back(_to_tower(e.begin(), e.end() - 1));
+    return towers;
 }
 
 void Tower::dfs(int n, std::vector<Record> &sk, std::vector<std::vector<Record>> &res)
 {
-
-
     /*
      * Calculate some basic information. The reason we don't
      * put this information in arguments is that calculation
@@ -184,7 +251,11 @@ void Tower::dfs(int n, std::vector<Record> &sk, std::vector<std::vector<Record>>
 
     /*
      * TODO: brach pruning here
+     * Pruning one: the remaning slots in this branch are not enough for
+     * non-satisfied ancestors
      */
+    if (dep + nq > n + 1) return;
+
 
     /*
      * Case I: Open another bracket
@@ -207,14 +278,14 @@ void Tower::dfs(int n, std::vector<Record> &sk, std::vector<std::vector<Record>>
     if ((nqs.size() > 1 || natoms == n) && !sk.back().is_open()) {
         auto k = (int)sk.size();
         sk.emplace_back();
-        link[pos_left.back()] = (int)link.size();
+        link[pos_left.back()] = k;
         link.push_back(pos_left.back());
 
         if (link[k] == 0 || !sk[link[k]-1].is_close() ||
             _cmp(link[link[k]-1], link[k]-1, link[k], k, sk) < 0) {
             // check distribution of quantifiers
             // [dep, dep + nq)
-            std::vector<int> p(nq);
+            std::vector<int> p((unsigned)nq);
             for (int i = 0; i < nq; i++) p[i] = i;
             int prev = 0, last = -1;
             bool ok = true;
@@ -228,11 +299,11 @@ void Tower::dfs(int n, std::vector<Record> &sk, std::vector<std::vector<Record>>
                             _union(sk[i].arg1() - dep, sk[i].arg2() - dep, p);
                     }
                     else {
-                        if (sk[i].arg1() >= dep) {
+                        if (sk[i].arg1() >= dep && sk[i].arg1() < dep + nq) {
                             if (last != -1) _union(last, sk[i].arg1() - dep, p);
                             last = sk[i].arg1() - dep;
                         }
-                        if (sk[i].arg2() >= dep) {
+                        if (sk[i].arg2() >= dep && sk[i].arg2() < dep + nq) {
                             if (last != -1) _union(last, sk[i].arg2() - dep, p);
                             last = sk[i].arg2() - dep;
                         }
