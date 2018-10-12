@@ -7,8 +7,37 @@
 
 #include <vector>
 #include <string>
+#include <cassert>
 
 const int undefined = -7777777;
+
+struct Record {
+    // Close bracket
+    Record() : is_bracket(true), is_open_pos(false), int1(0), int2(0) {}
+    // Open bracket
+    Record(int _nq) : is_bracket(true), is_open_pos(true), int1(_nq), int2(0) {}
+    // Atomic formula
+    Record(bool _is_pos, int _arg1, int _arg2) : is_bracket(false), is_open_pos(_is_pos), int1(_arg1), int2(_arg2) {}
+
+    bool is_close() { return is_bracket && !is_open_pos; }
+
+    bool is_open() { return is_bracket && is_open_pos; }
+
+    bool is_atom() { return !is_bracket; }
+
+    int nq() { assert(is_open()); return int1; }
+
+    int arg1() { assert(!is_bracket); return int1; }
+
+    int arg2() { assert(!is_bracket); return int2; }
+
+    bool is_positive() { assert(!is_bracket); return is_open_pos; }
+
+private:
+    bool is_bracket;
+    bool is_open_pos;
+    int int1, int2;
+};
 
 struct Atom {
     bool is_positive;
@@ -81,11 +110,12 @@ public:
 private:
     typedef std::pair<int, Tower> _Record;
 
-    Tower() = default;
     Tower(int, int, std::vector<Atom>, std::vector<Tower>);
-    static void _dfs(int, int, std::vector<std::vector<_Record>> &,
-                        std::vector<_Record> &);
+    static void _dfs1(int, int, std::vector<std::vector<_Record>> &,
+                      std::vector<_Record> &);
     static std::vector<Tower> generate_skeleton(int);
+
+    static void dfs(int, std::vector<Record> &);
 };
 
 

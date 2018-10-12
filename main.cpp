@@ -11,9 +11,10 @@ using namespace std;
 int main() {
     std::cout << "Hello, World!" << std::endl;
 
-    auto sks = Tower::generate(2);
+    auto sks = Tower::generate(4);
     for (auto &e : sks)
         cout << e.to_skeleton_string() << endl;
+    cout << sks.size() << endl;
 
     return 0;
 }
