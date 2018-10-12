@@ -95,14 +95,6 @@ Tower Tower::_to_tower(std::vector<Record>::iterator lo,
     std::vector<Tower> towers;
     int n = 0, prev = 0;
     std::vector<Record>::iterator last;
-    /*
-    for (auto it = lo; it <= hi; ++it) {
-        if (it->is_open()) printf("(");
-        else if (it->is_close()) printf(")");
-        else printf("a");
-    }
-    puts("");
-    */
     for (auto it = lo + 1; it < hi; ++it) {
         if (it->is_atom()) {
             n++;
@@ -194,6 +186,7 @@ int _find(int k, std::vector<int> &p)
 
 void _union(int x, int y, std::vector<int> &p)
 {
+    assert(x < p.size() && y < p.size());
     p[_find(x, p)] = _find(y, p);
 }
 
@@ -254,7 +247,74 @@ void Tower::dfs(int n, std::vector<Record> &sk, std::vector<std::vector<Record>>
      * Pruning one: the remaning slots in this branch are not enough for
      * non-satisfied ancestors
      */
-    if (dep + nq > n + 1) return;
+    if (natoms < n) {
+        // our greedy algorithm only works when there is a slot remaining
+        // if the last element is close, we new a dummy open bracket with
+        // nvar = 1
+        bool is_new = sk.back().is_close();
+        if (is_new) {
+            sk.emplace_back(1);
+            nqs.push_back(1);
+            pos_left.push_back((int)sk.size());
+            link.push_back(-1);
+        }
+
+        // It's safe to set link[pos_left[k]] to dummy value
+        for (auto &e : pos_left) link[e] = (int)sk.size();
+
+        int _dep = 0;
+        int need = 0;
+        for (int k = 0; k < nqs.size(); k++) {
+            std::vector<int> p((unsigned)nqs[k]);
+            for (int i = 0; i < nqs[k]; i++) p[i] = i;
+            for (int i = pos_left[k] + 1; i < sk.size(); ) {
+                if (sk[i].is_atom()) {
+                    if (sk[i].arg1() >= _dep && sk[i].arg2() >= _dep)
+                        _union(sk[i].arg1() - _dep, sk[i].arg2() - _dep, p);
+                    i++;
+                }
+                else {
+                    for (int j = i + 1, last = -1; j < link[i]; j++)
+                        if (sk[j].is_atom()) {
+                            if (sk[j].arg1() >= _dep && sk[j].arg1() < _dep + nqs[k]) {
+                                if (last != -1) _union(last, sk[j].arg1() - _dep, p);
+                                last = sk[j].arg1() - _dep;
+                            }
+                            if (sk[j].arg2() >= _dep && sk[j].arg2() < _dep + nqs[k]) {
+                                if (last != -1) _union(last, sk[j].arg2() - _dep, p);
+                                last = sk[j].arg2() - _dep;
+                            }
+                        }
+                    i = link[i] + 1;
+                }
+            }
+
+            for (int i = 0; i < nqs[k]; i++) if (_find(i, p) == i) need++;
+            if (k + 1 < nqs.size()) {
+                // need to find whether current branch contains at least one quantifier,
+                // if so then need += nparts - 1 else need += nparts
+                for (int i = pos_left[k + 1] + 1; i < sk.size(); i++)
+                    if (sk[i].is_atom() && ((sk[i].arg1() >= _dep && sk[i].arg1() < _dep + nqs[k]) ||
+                                            (sk[i].arg2() >= _dep && sk[i].arg2() < _dep + nqs[k]))) {
+                        need--;
+                        break;
+                    }
+            }
+            else need--;
+
+            _dep += nqs[k];
+            if (need + natoms > n) break;
+        }
+
+        if (is_new) {
+            sk.pop_back();
+            nqs.pop_back();
+            pos_left.pop_back();
+            link.pop_back();
+        }
+        if (need + natoms > n) return;
+    }
+
 
 
     /*
@@ -287,35 +347,45 @@ void Tower::dfs(int n, std::vector<Record> &sk, std::vector<std::vector<Record>>
             // [dep, dep + nq)
             std::vector<int> p((unsigned)nq);
             for (int i = 0; i < nq; i++) p[i] = i;
-            int prev = 0, last = -1;
             bool ok = true;
-            for (int i = link[k] + 1; i < k; i++) {
-                if (sk[i].is_atom()) {
-                    if (prev == 0) {
-                        /* one of arguments must be in [dep, dep + nq) is
-                         * guaranteed when it was created
-                         */
+
+            if (nqs.size() >= 2) {
+                /* check whether contains direct parent
+                 * [depp, dep), [dep, dep + nq)
+                 */
+                int depp = dep - nqs[nqs.size() - 2];
+                ok = false;
+                for (int i = link[k] + 1; i < k; i++)
+                    if (sk[i].is_atom() && ((sk[i].arg1() >= depp && sk[i].arg1() < dep) ||
+                                            (sk[i].arg2() >= depp && sk[i].arg2() < dep))) {
+                        ok = true;
+                        break;
+                    }
+            }
+
+            if (ok) {
+                for (int i = link[k] + 1; i < k; ) {
+                    if (sk[i].is_atom()) {
+                        // one of arguments must be in [dep, dep + nq) is
+                        // guaranteed when it was created
                         if (sk[i].arg1() >= dep && sk[i].arg2() >= dep)
                             _union(sk[i].arg1() - dep, sk[i].arg2() - dep, p);
+                        i++;
                     }
                     else {
-                        if (sk[i].arg1() >= dep && sk[i].arg1() < dep + nq) {
-                            if (last != -1) _union(last, sk[i].arg1() - dep, p);
-                            last = sk[i].arg1() - dep;
-                        }
-                        if (sk[i].arg2() >= dep && sk[i].arg2() < dep + nq) {
-                            if (last != -1) _union(last, sk[i].arg2() - dep, p);
-                            last = sk[i].arg2() - dep;
-                        }
+                        for (int j = i + 1, last = -1; j < link[i]; j++)
+                            if (sk[j].is_atom()) {
+                                if (sk[j].arg1() >= dep && sk[j].arg1() < dep + nq) {
+                                    if (last != -1) _union(last, sk[j].arg1() - dep, p);
+                                    last = sk[j].arg1() - dep;
+                                }
+                                if (sk[j].arg2() >= dep && sk[j].arg2() < dep + nq) {
+                                    if (last != -1) _union(last, sk[j].arg2() - dep, p);
+                                    last = sk[j].arg2() - dep;
+                                }
+                            }
+                        i = link[i] + 1;
                     }
-                }
-                else if (sk[i].is_open()) {
-                    if (prev++ == 0) last = -1;
-                }
-                else if (--prev == 0 && last == -1) {
-                    // we have no quantifiers in this subtree
-                    ok = false;
-                    break;
                 }
             }
             for (int i = 1; i < nq; i++) if (_find(0, p) != _find(i, p)) ok = false;
@@ -334,8 +404,10 @@ void Tower::dfs(int n, std::vector<Record> &sk, std::vector<std::vector<Record>>
                 for (int k = 0; k < 2; k++) {
                     auto l = (int)sk.size();
                     sk.emplace_back((bool)k, i, j);
-                    if (!sk[l-1].is_atom() || _cmp(l-1, l-1, l, l, sk) < 0)
+                    if (!sk[l-1].is_atom() || _cmp(l-1, l-1, l, l, sk) < 0) {
+                        // check no complement
                         dfs(n, sk, res);
+                    }
                     sk.pop_back();
                 }
     }
