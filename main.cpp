@@ -11,8 +11,8 @@ using namespace std;
 int main() {
     std::cout << "Hello, World!" << std::endl;
 
-    auto towers = Tower::search_raw(4);
-    //for (auto &tower : towers) cout << tower.to_string() << endl;
+    auto towers = Tower::search_raw(3);
+    for (auto &tower : towers) cout << tower.to_string() << endl;
     cout << towers.size() << endl;
 
     return 0;

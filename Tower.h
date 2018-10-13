@@ -11,13 +11,20 @@
 
 const int undefined = -7777777;
 
-struct Record {
+struct Tree {
+    bool uni, cuni; // is quantifier permutation of all ancestors unique
+    int nq, lpos;
+
+    Tree(bool _uni, int _nq, int _lpos) : uni(_uni), nq(_nq), lpos(_lpos), cuni(false) {}
+};
+
+struct Stack {
     // Close bracket
-    Record() : is_bracket(true), is_open_pos(false), int1(0), int2(0) {}
+    Stack() : is_bracket(true), is_open_pos(false), int1(0), int2(0), link(-1) {}
     // Open bracket
-    Record(int _nq) : is_bracket(true), is_open_pos(true), int1(_nq), int2(0) {}
+    Stack(int _nq) : is_bracket(true), is_open_pos(true), int1(_nq), int2(0), link(-1) {}
     // Atomic formula
-    Record(bool _is_pos, int _arg1, int _arg2) : is_bracket(false), is_open_pos(_is_pos), int1(_arg1), int2(_arg2) {}
+    Stack(bool _is_pos, int _arg1, int _arg2) : is_bracket(false), is_open_pos(_is_pos), int1(_arg1), int2(_arg2), link(-1) {}
 
     bool is_close() { return is_bracket && !is_open_pos; }
 
@@ -32,6 +39,8 @@ struct Record {
     int arg2() { assert(!is_bracket); return int2; }
 
     bool is_positive() { assert(!is_bracket); return is_open_pos; }
+
+    int link;
 
 private:
     bool is_bracket;
@@ -109,11 +118,15 @@ public:
 
 private:
 
-    static Tower _to_tower(std::vector<Record>::iterator, std::vector<Record>::iterator);
+    static Tower _to_tower(std::vector<Stack>::iterator, std::vector<Stack>::iterator);
 
     Tower(int, int, std::vector<Atom>, std::vector<Tower>);
 
-    static void dfs(int, std::vector<Record> &, std::vector<std::vector<Record>> &);
+    static void dfs(int, int,
+                    std::vector<Tree> &,
+                    std::vector<Stack> &,
+                    std::vector<Tower> &,
+                    std::vector<std::vector<std::vector<int>>> &);
 
 };
 

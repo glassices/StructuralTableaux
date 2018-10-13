@@ -48,12 +48,12 @@ int Tower::cmp(const Tower &t1, const Tower &t2)
 
     for (int i = 0; i < t1.atoms.size(); i++) {
         int ret = Atom::cmp(t1.atoms[i], t2.atoms[i]);
-        if (ret != 0) return ret; // include undefined
+        if (ret != 0) return ret; // include utrefined
     }
 
     for (int i = 0; i < t1.towers.size(); i++) {
         int ret = Tower::cmp(t1.towers[i], t2.towers[i]);
-        if (ret != 0) return ret; // include undefined
+        if (ret != 0) return ret; // include utrefined
     }
 
     return 0;
@@ -87,14 +87,14 @@ Tower Tower::make_tower(int natom, int nvar,
     return tower;
 }
 
-Tower Tower::_to_tower(std::vector<Record>::iterator lo,
-                       std::vector<Record>::iterator hi)
+Tower Tower::_to_tower(std::vector<Stack>::iterator lo,
+                       std::vector<Stack>::iterator hi)
 {
     assert(lo->is_open());
     std::vector<Atom> atoms;
     std::vector<Tower> towers;
     int n = 0, prev = 0;
-    std::vector<Record>::iterator last;
+    std::vector<Stack>::iterator last;
     for (auto it = lo + 1; it < hi; ++it) {
         if (it->is_atom()) {
             n++;
@@ -111,7 +111,7 @@ Tower Tower::_to_tower(std::vector<Record>::iterator lo,
     return Tower(n, lo->nq(), atoms, towers);
 }
 
-int _cmp(int l1, int r1, int l2, int r2, std::vector<Record> &sk)
+int _cmp(int l1, int r1, int l2, int r2, std::vector<Stack> &sk)
 {
     if (sk[l1].is_atom()) {
         if (sk[l2].is_atom()) {
@@ -179,68 +179,85 @@ int _cmp(int l1, int r1, int l2, int r2, std::vector<Record> &sk)
     }
 }
 
-int _find(int k, std::vector<int> &p)
+int _fitr(int k, std::vector<int> &p)
 {
-    return p[k] == k ? k : p[k] = _find(p[k], p);
+    return p[k] == k ? k : p[k] = _fitr(p[k], p);
 }
 
 void _union(int x, int y, std::vector<int> &p)
 {
     assert(x < p.size() && y < p.size());
-    p[_find(x, p)] = _find(y, p);
+    p[_fitr(x, p)] = _fitr(y, p);
+}
+
+void _get_pmu(int k, int n, std::vector<int> &cnt, std::vector<std::vector<int>> &pmu)
+{
+    if (k == n) pmu.push_back(cnt);
+    else {
+        for (int i = 0; i < n; i++) {
+            bool ok = true;
+            for (auto &e : cnt) if (i == e) { ok = false; break; }
+            if (ok) {
+                cnt.push_back(i);
+                _get_pmu(k + 1, n, cnt, pmu);
+                cnt.pop_back();
+            }
+        }
+    }
 }
 
 std::vector<Tower> Tower::search_raw(int n)
 {
-    std::vector<Record> sk;
-    std::vector<std::vector<Record>> res;
+    std::vector<std::vector<std::vector<int>>> pmu;
+    pmu.emplace_back();
     for (int i = 1; i <= n + 1; i++) {
+        pmu.emplace_back();
+        std::vector<int> cnt;
+        _get_pmu(0, i, cnt, pmu.back());
+    }
+
+    std::vector<Tree> tr;
+    std::vector<Stack> sk;
+    std::vector<Tower> res;
+    for (int i = 1; i <= n + 1; i++) {
+        tr.emplace_back(true, i, 0);
         sk.emplace_back(i);
-        dfs(n, sk, res);
+        dfs(n, 0, tr, sk, res, pmu);
+        tr.pop_back();
         sk.pop_back();
     }
-    std::vector<Tower> towers;
-    for (auto &e : res) towers.push_back(_to_tower(e.begin(), e.end() - 1));
-    return towers;
+    return res;
 }
 
-void Tower::dfs(int n, std::vector<Record> &sk, std::vector<std::vector<Record>> &res)
+void Tower::dfs(int n, int natoms, std::vector<Tree> &tr,
+                std::vector<Stack> &sk, std::vector<Tower> &res,
+                std::vector<std::vector<std::vector<int>>> &pmu)
 {
+    /*
+     * is_unique itricates whether all permutation choosing of ancestors is unique
+     * This is useful in pruning. If is_unique is true, then we can safely check
+     * whether the current permutation of quantifiers satisfies the smallest setting
+     * is_unique can be deduced from many sources. The most cheap atr convenient
+     * is to deduce it from atomic children
+     * If one node is unique then all its ancestors must be unique
+     */
     /*
      * Calculate some basic information. The reason we don't
      * put this information in arguments is that calculation
-     * is cheap and we want to avoid complicated recursion
+     * is cheap atr we want to avoid complicated recursion
      * arguments
-     * All closed braches should be ordered itself and ordered
+     * All closed braches should be ordered itself atr ordered
      * with its preceding brothers
      */
-    int natoms = 0;
-    std::vector<int> nqs;
-    std::vector<int> link(sk.size(), -1);
-    std::vector<int> pos_left;
-    for (int i = 0; i < sk.size(); i++) {
-        if (sk[i].is_open()) {
-            nqs.push_back(sk[i].nq());
-            pos_left.push_back(i);
-        }
-        else if (sk[i].is_close()) {
-            nqs.pop_back();
-            link[pos_left.back()] = i;
-            link[i] = pos_left.back();
-            pos_left.pop_back();
-        }
-        else
-            natoms++;
-    }
 
     // Check whether done
-    if (nqs.empty()) {
-        res.push_back(sk);
+    if (tr.empty()) {
+        res.push_back(_to_tower(sk.begin(), sk.end() - 1));
         return;
     }
 
-    int dep = 0, nq = nqs.back();
-    for (int i = 0; i < nqs.size() - 1; i++) dep += nqs[i];
+    int dep = 0, nq = tr.back().nq;
+    for (int i = 0; i < tr.size() - 1; i++) dep += tr[i].nq;
 
     /*
      * TODO: brach pruning here
@@ -254,63 +271,59 @@ void Tower::dfs(int n, std::vector<Record> &sk, std::vector<std::vector<Record>>
         bool is_new = sk.back().is_close();
         if (is_new) {
             sk.emplace_back(1);
-            nqs.push_back(1);
-            pos_left.push_back((int)sk.size());
-            link.push_back(-1);
+            tr.emplace_back(false, 1, (int)sk.size());
         }
 
         // It's safe to set link[pos_left[k]] to dummy value
-        for (auto &e : pos_left) link[e] = (int)sk.size();
+        for (auto &e : tr) sk[e.lpos].link = (int)sk.size();
 
         int _dep = 0;
         int need = 0;
-        for (int k = 0; k < nqs.size(); k++) {
-            std::vector<int> p((unsigned)nqs[k]);
-            for (int i = 0; i < nqs[k]; i++) p[i] = i;
-            for (int i = pos_left[k] + 1; i < sk.size(); ) {
+        for (int k = 0; k < tr.size(); k++) {
+            std::vector<int> p((unsigned)tr[k].nq);
+            for (int i = 0; i < tr[k].nq; i++) p[i] = i;
+            for (int i = tr[k].lpos + 1; i < sk.size(); ) {
                 if (sk[i].is_atom()) {
                     if (sk[i].arg1() >= _dep && sk[i].arg2() >= _dep)
                         _union(sk[i].arg1() - _dep, sk[i].arg2() - _dep, p);
                     i++;
                 }
                 else {
-                    for (int j = i + 1, last = -1; j < link[i]; j++)
+                    for (int j = i + 1, last = -1; j < sk[i].link; j++)
                         if (sk[j].is_atom()) {
-                            if (sk[j].arg1() >= _dep && sk[j].arg1() < _dep + nqs[k]) {
+                            if (sk[j].arg1() >= _dep && sk[j].arg1() < _dep + tr[k].nq) {
                                 if (last != -1) _union(last, sk[j].arg1() - _dep, p);
                                 last = sk[j].arg1() - _dep;
                             }
-                            if (sk[j].arg2() >= _dep && sk[j].arg2() < _dep + nqs[k]) {
+                            if (sk[j].arg2() >= _dep && sk[j].arg2() < _dep + tr[k].nq) {
                                 if (last != -1) _union(last, sk[j].arg2() - _dep, p);
                                 last = sk[j].arg2() - _dep;
                             }
                         }
-                    i = link[i] + 1;
+                    i = sk[i].link + 1;
                 }
             }
 
-            for (int i = 0; i < nqs[k]; i++) if (_find(i, p) == i) need++;
-            if (k + 1 < nqs.size()) {
-                // need to find whether current branch contains at least one quantifier,
+            for (int i = 0; i < tr[k].nq; i++) if (_fitr(i, p) == i) need++;
+            if (k + 1 < tr.size()) {
+                // need to fitr whether current branch contains at least one quantifier,
                 // if so then need += nparts - 1 else need += nparts
-                for (int i = pos_left[k + 1] + 1; i < sk.size(); i++)
-                    if (sk[i].is_atom() && ((sk[i].arg1() >= _dep && sk[i].arg1() < _dep + nqs[k]) ||
-                                            (sk[i].arg2() >= _dep && sk[i].arg2() < _dep + nqs[k]))) {
+                for (int i = tr[k + 1].lpos + 1; i < sk.size(); i++)
+                    if (sk[i].is_atom() && ((sk[i].arg1() >= _dep && sk[i].arg1() < _dep + tr[k].nq) ||
+                                            (sk[i].arg2() >= _dep && sk[i].arg2() < _dep + tr[k].nq))) {
                         need--;
                         break;
                     }
             }
             else need--;
 
-            _dep += nqs[k];
+            _dep += tr[k].nq;
             if (need + natoms > n) break;
         }
 
         if (is_new) {
             sk.pop_back();
-            nqs.pop_back();
-            pos_left.pop_back();
-            link.pop_back();
+            tr.pop_back();
         }
         if (need + natoms > n) return;
     }
@@ -322,12 +335,64 @@ void Tower::dfs(int n, std::vector<Record> &sk, std::vector<std::vector<Record>>
      * Theoretically we can have maximum n - atoms + 1 new
      * quantifiers here. However we still need to leave a slot
      * for ancestor to come in, so this extra 1 should be removed
+     * Check whether all atomic formulas in current subtree follows ordering
+     * if unique is tree, and calculate unique value of its child
      */
-    for (int k = 1; k <= n - natoms; k++) {
-        sk.emplace_back(k);
-        dfs(n, sk, res);
-        sk.pop_back();
+    // only do unique checking the first time opening a bracket in current tree
+
+    bool ok = true;
+    if (sk.back().is_atom() || sk.back().is_open()) {
+        // first time, need to calculate cuni
+        if (sk.back().is_open()) tr.back().cuni = tr.back().uni && nq == 1;
+        else if (nq == 1) tr.back().cuni = tr.back().uni;
+        else if (!tr.back().uni) tr.back().cuni = false;
+        else {
+            // also need to check validity
+            int count = 0;
+            for (auto &p : pmu[nq]) {
+                std::vector<Atom> atoms;
+                for (int i = tr.back().lpos + 1; i < sk.size(); i++) {
+                    assert(sk[i].is_atom());
+                    atoms.emplace_back(sk[i].is_positive(),
+                                       sk[i].arg1() < dep ? sk[i].arg1() : p[sk[i].arg1()-dep]+dep,
+                                       sk[i].arg2() < dep ? sk[i].arg2() : p[sk[i].arg2()-dep]+dep);
+                }
+                std::sort(atoms.begin(), atoms.end());
+                assert(!atoms.empty());
+                int tmp = 0;
+                for (int i = 0, j = tr.back().lpos + 1; i < atoms.size(); i++, j++) {
+                    // we don't need to consider polarity
+                    if (atoms[i].arg1 < sk[j].arg1() ||
+                        (atoms[i].arg1 == sk[j].arg1() && atoms[i].arg2 < sk[j].arg2())) {
+                        tmp = -1;
+                        break;
+                    }
+                    if (atoms[i].arg1 > sk[j].arg1() ||
+                        (atoms[i].arg1 == sk[j].arg1() && atoms[i].arg2 > sk[j].arg2())) {
+                        tmp = 1;
+                        break;
+                    }
+                }
+                if (tmp == -1) { ok = false; break; }
+                if (tmp == 0) count++;
+            }
+            if (ok) {
+                assert(count >= 1);
+                tr.back().cuni = (count == 1);
+            }
+        }
     }
+
+    if (ok) {
+        for (int k = 1; k <= n - natoms; k++) {
+            tr.emplace_back(tr.back().cuni, k, sk.size());
+            sk.emplace_back(k);
+            dfs(n, natoms, tr, sk, res, pmu);
+            tr.pop_back();
+            sk.pop_back();
+        }
+    }
+
 
     /*
      * Case II: Close one bracket. Need to check ordering now.
@@ -335,27 +400,30 @@ void Tower::dfs(int n, std::vector<Record> &sk, std::vector<std::vector<Record>>
      * to check ordering with its preceding brothers
      * Check quantifers are well distributed in subtrees
      */
-    if ((nqs.size() > 1 || natoms == n) && !sk.back().is_open()) {
+    if ((tr.size() > 1 || natoms == n) && !sk.back().is_open()) {
         auto k = (int)sk.size();
         sk.emplace_back();
-        link[pos_left.back()] = k;
-        link.push_back(pos_left.back());
+        sk[tr.back().lpos].link = k;
+        sk[k].link = tr.back().lpos;
+        auto save = tr.back();
+        tr.pop_back();
 
-        if (link[k] == 0 || !sk[link[k]-1].is_close() ||
-            _cmp(link[link[k]-1], link[k]-1, link[k], k, sk) < 0) {
+
+        if (sk[k].link == 0 || !sk[sk[k].link-1].is_close() ||
+            _cmp(sk[sk[k].link-1].link, sk[k].link-1, sk[k].link, k, sk) < 0) {
             // check distribution of quantifiers
             // [dep, dep + nq)
             std::vector<int> p((unsigned)nq);
             for (int i = 0; i < nq; i++) p[i] = i;
             bool ok = true;
 
-            if (nqs.size() >= 2) {
+            if (!tr.empty()) {
                 /* check whether contains direct parent
                  * [depp, dep), [dep, dep + nq)
                  */
-                int depp = dep - nqs[nqs.size() - 2];
+                int depp = dep - tr.back().nq;
                 ok = false;
-                for (int i = link[k] + 1; i < k; i++)
+                for (int i = sk[k].link + 1; i < k; i++)
                     if (sk[i].is_atom() && ((sk[i].arg1() >= depp && sk[i].arg1() < dep) ||
                                             (sk[i].arg2() >= depp && sk[i].arg2() < dep))) {
                         ok = true;
@@ -364,7 +432,7 @@ void Tower::dfs(int n, std::vector<Record> &sk, std::vector<std::vector<Record>>
             }
 
             if (ok) {
-                for (int i = link[k] + 1; i < k; ) {
+                for (int i = sk[k].link + 1; i < k; ) {
                     if (sk[i].is_atom()) {
                         // one of arguments must be in [dep, dep + nq) is
                         // guaranteed when it was created
@@ -373,7 +441,7 @@ void Tower::dfs(int n, std::vector<Record> &sk, std::vector<std::vector<Record>>
                         i++;
                     }
                     else {
-                        for (int j = i + 1, last = -1; j < link[i]; j++)
+                        for (int j = i + 1, last = -1; j < sk[i].link; j++)
                             if (sk[j].is_atom()) {
                                 if (sk[j].arg1() >= dep && sk[j].arg1() < dep + nq) {
                                     if (last != -1) _union(last, sk[j].arg1() - dep, p);
@@ -384,15 +452,16 @@ void Tower::dfs(int n, std::vector<Record> &sk, std::vector<std::vector<Record>>
                                     last = sk[j].arg2() - dep;
                                 }
                             }
-                        i = link[i] + 1;
+                        i = sk[i].link + 1;
                     }
                 }
             }
-            for (int i = 1; i < nq; i++) if (_find(0, p) != _find(i, p)) ok = false;
-            if (ok) dfs(n, sk, res);
+            for (int i = 1; i < nq; i++) if (_fitr(0, p) != _fitr(i, p)) ok = false;
+            if (ok) dfs(n, natoms, tr, sk, res, pmu);
         }
 
         sk.pop_back();
+        tr.push_back(save);
     }
 
     /*
@@ -406,7 +475,7 @@ void Tower::dfs(int n, std::vector<Record> &sk, std::vector<std::vector<Record>>
                     sk.emplace_back((bool)k, i, j);
                     if (!sk[l-1].is_atom() || _cmp(l-1, l-1, l, l, sk) < 0) {
                         // check no complement
-                        dfs(n, sk, res);
+                        dfs(n, natoms + 1, tr, sk, res, pmu);
                     }
                     sk.pop_back();
                 }
